@@ -4,10 +4,6 @@ export enum Role {
   PRESIDENTE_SUPLENTE = 'Presidente Suplente',
   VICEPRESIDENTE_TITULAR = 'Vicepresidente Titular',
   VICEPRESIDENTE_SUPLENTE = 'Vicepresidente Suplente',
-  PRIMER_REEMPLAZO_TITULAR = 'Primer Reemplazo Titular',
-  PRIMER_REEMPLAZO_SUPLENTE = 'Primer Reemplazo Suplente',
-  SEGUNDO_REEMPLAZO_TITULAR = 'Segundo Reemplazo Titular',
-  SEGUNDO_REEMPLAZO_SUPLENTE = 'Segundo Reemplazo Suplente',
   SECRETARIO_GENERAL_TITULAR = 'Secretario General Titular',
   SECRETARIO_GENERAL_SUPLENTE = 'Secretario General Suplente',
   TESORERO_TITULAR = 'Tesorero Titular',
@@ -53,6 +49,7 @@ export interface User {
   pedirPalabra: 'NINGUNO' | 'ESPERA' | 'CONCEDIDA';
   activo: boolean;
   banca?: number;
+  sanciones?: string[];
 }
 
 export interface NewsItem {
@@ -74,24 +71,58 @@ export interface Moción {
   fecha: string;
 }
 
+export interface Reclamo {
+  id: string;
+  usuarioId: string;
+  usuarioNombre: string;
+  asunto: string;
+  descripcion: string;
+  estado: 'PENDIENTE' | 'EN_REVISIÓN' | 'RESUELTO';
+  fecha: string;
+}
+
+export interface FinancialMovement {
+  id: string;
+  tipo: 'INGRESO' | 'EGRESO';
+  monto: number;
+  descripcion: string;
+  fecha: string;
+}
+
 export interface ArchivedResolution {
   id: string;
   asunto: string;
   fecha: string;
   resultado: 'APROBADA' | 'RECHAZADA' | 'ARCHIVADA';
+  votosSi: number;
+  votosNo: number;
+  votosAbs: number;
   textoLegal: string;
-  votosDetalle: { nombreCompleto: string, voto: string }[];
 }
 
-export interface SessionRecord {
+export interface Peticion {
   id: string;
+  emisor: string;
+  idSecretaria: string;
+  descripcion: string;
   fecha: string;
-  horaInicio: string;
-  horaFin: string;
-  presentes: string[];
-  ausentes: string[];
-  acciones: string[];
-  resoluciones: string[];
+  estado: 'PENDIENTE' | 'ATENDIDA';
+}
+
+export interface AppState {
+  users: User[];
+  news: NewsItem[];
+  logs: SystemLog[];
+  mociones: Moción[];
+  reclamos: Reclamo[];
+  historialResoluciones: ArchivedResolution[];
+  finanzas: FinancialMovement[];
+  peticiones: Peticion[];
+  activeVote: VoteSession | null;
+  sessionActive: boolean;
+  speakerId: string | null;
+  sessionStartTime: string | null;
+  waitingList: string[];
 }
 
 export interface SystemLog {
