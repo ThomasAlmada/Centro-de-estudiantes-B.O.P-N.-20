@@ -1,4 +1,5 @@
-import React, { useState, useMemo, useEffect, useCallback } from 'react';
+
+import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { Role, User, NewsItem, VoteSession, VoteType, Moción, SystemLog, ArchivedResolution, AppState, Reclamo, FinancialMovement, Peticion } from './types';
 import { INITIAL_USERS, INITIAL_NEWS } from './constants';
 import { 
@@ -7,12 +8,18 @@ import {
   RotateCcw, Gavel, BarChart3, ShieldAlert, Settings, Download, Cpu, 
   AlertCircle, LayoutDashboard, History, MessageSquareText, Search, Plus,
   ChevronRight, Clock, Trophy, Palette, DollarSign, Scale, Globe, PartyPopper,
-  AlertTriangle, BookOpen, PenTool, Printer, XCircle, CheckCircle, Inbox, Shield, Lock, FileCheck
+  AlertTriangle, BookOpen, PenTool, Printer, XCircle, CheckCircle, Inbox, Shield, Lock, FileCheck,
+  CloudLightning, Wifi
 } from 'lucide-react';
 import { geminiAssistant } from './geminiService';
+import Gun from 'gun/gun';
 
-const STATE_KEY = 'BOP20_PLATAFORMA_ESTUDIANTIL_V7';
-const channel = new BroadcastChannel('bop20_broadcast_channel');
+// Inicialización de Gun con servidores relay públicos para sincronización global
+const gun = Gun([
+  'https://gun-manhattan.herokuapp.com/gun',
+  'https://relay.peer.ooo/gun'
+]);
+const BOP_NODE_KEY = 'bop20_official_state_v10'; // Cambiar versión si se desea resetear la red
 
 const SYMBOLS = {
   escudoArg: "https://upload.wikimedia.org/wikipedia/commons/f/ff/Coat_of_arms_of_Argentina.svg",
@@ -27,43 +34,53 @@ export default function App() {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [dniInput, setDniInput] = useState('');
   const [passInput, setPassInput] = useState('');
+  const [isSynced, setIsSynced] = useState(false);
 
-  const [appState, setAppState] = useState<AppState>(() => {
-    const initialState: AppState = {
-      users: INITIAL_USERS,
-      news: INITIAL_NEWS,
-      logs: [],
-      mociones: [],
-      reclamos: [],
-      historialResoluciones: [],
-      finanzas: [],
-      peticiones: [],
-      activeVote: null,
-      sessionActive: false,
-      speakerId: null,
-      sessionStartTime: null,
-      waitingList: []
-    };
-    try {
-      const saved = localStorage.getItem(STATE_KEY);
-      if (saved) return JSON.parse(saved);
-    } catch (e) { console.error(e); }
-    return initialState;
+  const [appState, setAppState] = useState<AppState>({
+    users: INITIAL_USERS,
+    news: INITIAL_NEWS,
+    logs: [],
+    mociones: [],
+    reclamos: [],
+    historialResoluciones: [],
+    finanzas: [],
+    peticiones: [],
+    activeVote: null,
+    sessionActive: false,
+    speakerId: null,
+    sessionStartTime: null,
+    waitingList: []
   });
 
+  // Suscripción en tiempo real a la red global
   useEffect(() => {
-    const handleSync = (event: MessageEvent) => {
-      if (event.data) setAppState(prev => ({ ...prev, ...event.data }));
-    };
-    channel.addEventListener('message', handleSync);
-    return () => channel.removeEventListener('message', handleSync);
+    const node = gun.get(BOP_NODE_KEY);
+    
+    node.on((data) => {
+      if (data && data.fullState) {
+        try {
+          const parsed = JSON.parse(data.fullState);
+          setAppState(parsed);
+          setIsSynced(true);
+        } catch (e) {
+          console.error("Error parsing sync data", e);
+        }
+      }
+    });
+
+    return () => node.off();
   }, []);
 
   const dispatch = useCallback((updates: Partial<AppState> | ((prev: AppState) => AppState)) => {
     setAppState(prev => {
       const next = typeof updates === 'function' ? updates(prev) : { ...prev, ...updates };
-      localStorage.setItem(STATE_KEY, JSON.stringify(next));
-      channel.postMessage(next);
+      
+      // Enviamos el estado a la red global (Gun)
+      gun.get(BOP_NODE_KEY).put({
+        fullState: JSON.stringify(next),
+        lastUpdate: Date.now()
+      });
+
       return next;
     });
   }, []);
@@ -74,7 +91,6 @@ export default function App() {
   const totalUsers = appState.users.length;
   const hasQuorum = presentCount > totalUsers / 2;
 
-  // Sincronizar usuario local con el estado global (importante para votos)
   const currentGlobalUser = useMemo(() => appState.users.find(u => u.id === currentUser?.id), [appState.users, currentUser]);
 
   const handleLogin = (e: React.FormEvent) => {
@@ -100,7 +116,7 @@ export default function App() {
     }));
   };
 
-  const menuItems = [
+  const menuItems = useMemo(() => [
     { id: 'home', label: 'Inicio', icon: <Home size={20}/>, cat: 'Principal' },
     { id: 'attendance', label: 'Asistencia', icon: <Calendar size={20}/>, cat: 'Sala' },
     { id: 'recinto', label: 'Recinto', icon: <Landmark size={20}/>, cat: 'Sala' },
@@ -117,25 +133,22 @@ export default function App() {
     { id: 'sec_finanzas', label: 'Sec. Finanzas', icon: <DollarSign size={20}/>, cat: 'Secretarías' },
     { id: 'sec_festejos', label: 'Sec. Festejos', icon: <PartyPopper size={20}/>, cat: 'Secretarías' },
     { id: 'sec_rel_ext', label: 'Rel. Exteriores', icon: <Globe size={20}/>, cat: 'Secretarías' },
-  ];
+  ], []);
 
-  const allowedMenuItems = menuItems.filter(item => {
-    if (isPresident) return true;
-    const userRole = currentUser?.cargo;
-    if (item.cat === 'Secretarías') {
-        if (item.id === 'sec_gral' && userRole === Role.SECRETARIO_GENERAL_TITULAR) return true;
-        if (item.id === 'sec_actas' && userRole === Role.SECRETARIO_ACTAS_TITULAR) return true;
-        if (item.id === 'sec_prensa' && userRole === Role.SECRETARIA_PRENSA_TITULAR) return true;
-        if (item.id === 'sec_cultura' && userRole === Role.SECRETARIA_CULTURA_TITULAR) return true;
-        if (item.id === 'sec_deportes' && userRole === Role.SECRETARIA_DEPORTES_TITULAR) return true;
-        if (item.id === 'sec_derecho' && userRole === Role.SECRETARIA_DERECHO_ESTUDIANTIL_TITULAR) return true;
-        if (item.id === 'sec_finanzas' && userRole === Role.SECRETARIA_FINANZAS_TITULAR) return true;
-        if (item.id === 'sec_festejos' && userRole === Role.SECRETARIA_FESTEJO_TITULAR) return true;
-        if (item.id === 'sec_rel_ext' && userRole === Role.SECRETARIA_RELACIONES_EXTERIORES_TITULAR) return true;
-        return false;
-    }
-    return true;
-  });
+  const allowedMenuItems = useMemo(() => {
+    if (!currentUser) return menuItems.filter(item => item.cat !== 'Secretarías');
+    
+    return menuItems.filter(item => {
+      if (isPresident) return true;
+      const userRole = currentUser?.cargo;
+      if (item.cat === 'Secretarías') {
+          if (!userRole) return false;
+          const roleMatch = item.id.replace('sec_', '').replace('_', ' ');
+          return userRole.toLowerCase().includes(roleMatch.toLowerCase());
+      }
+      return true;
+    });
+  }, [currentUser, isPresident, menuItems]);
 
   if (!isLogged) {
     return (
@@ -153,6 +166,7 @@ export default function App() {
                 Acceder al Sistema
               </button>
            </form>
+           {isSynced && <p className="mt-6 text-[10px] font-black text-emerald-500 uppercase tracking-widest animate-pulse">● Conectado a la Red Global BOP 20</p>}
         </div>
       </div>
     );
@@ -212,6 +226,12 @@ export default function App() {
                 <Menu size={24}/>
               </button>
               <div className="h-10 w-px bg-slate-200"></div>
+              
+              <div className="flex items-center gap-2 text-emerald-500" title="Sincronización Global Activa">
+                <Wifi size={18} className={isSynced ? 'animate-pulse' : 'opacity-20'} />
+                <span className="text-[9px] font-black uppercase tracking-widest hidden lg:block">Nube OK</span>
+              </div>
+
               <div className={`flex items-center gap-3 px-6 py-2.5 rounded-full text-[11px] font-black tracking-widest border-2 ${appState.sessionActive ? 'bg-green-50 text-green-700 border-green-200' : 'bg-red-50 text-red-700 border-red-200'}`}>
                  <div className={`w-2.5 h-2.5 rounded-full ${appState.sessionActive ? 'bg-green-600 animate-pulse' : 'bg-red-600'}`} />
                  {appState.sessionActive ? 'SALA EN SESIÓN' : 'RECESO'}
@@ -255,7 +275,8 @@ export default function App() {
   );
 }
 
-// --- SUBMÓDULOS ---
+// Los submódulos se mantienen iguales pero ahora sus props (appState, dispatch) 
+// están vinculados a Gun.js, lo que hace que todo sea global.
 
 function HomeModule({ user, appState, setActiveTab, isPresident, dispatch, hasQuorum }: any) {
   const isWaiting = appState.waitingList.includes(user.id);
@@ -360,7 +381,6 @@ function VotingModule({ appState, currentUser, dispatch, setActiveTab, isPreside
 
   return (
     <div className="space-y-10 animate-in pb-12">
-      {/* Cabecera de la Votación */}
       <div className="bg-[#1e293b] p-12 rounded-[3rem] shadow-2xl border-b-[15px] border-slate-900 flex flex-col md:flex-row justify-between items-center gap-8">
         <div className="flex-1">
           <div className="flex items-center gap-4 mb-4">
@@ -387,7 +407,6 @@ function VotingModule({ appState, currentUser, dispatch, setActiveTab, isPreside
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
-        {/* Curul Virtual / Tablero Electrónico */}
         <div className="bg-[#020617] rounded-[4rem] p-12 shadow-3xl flex flex-col items-center border border-white/5 min-h-[500px]">
            <h3 className="text-xs font-black text-slate-500 uppercase tracking-[0.4em] mb-12">Tablero Nominal de Sesión</h3>
            <div className="relative w-full h-full flex items-center justify-center">
@@ -416,7 +435,6 @@ function VotingModule({ appState, currentUser, dispatch, setActiveTab, isPreside
            </div>
         </div>
 
-        {/* Panel de Votación Personal */}
         <div className="bg-white rounded-[4rem] p-16 shadow-3xl border flex flex-col justify-center items-center text-center">
            {!isEligible ? (
              <div className="space-y-6">
@@ -448,19 +466,19 @@ function VotingModule({ appState, currentUser, dispatch, setActiveTab, isPreside
                 
                 <div className="grid grid-cols-1 gap-6 w-full max-w-md mx-auto">
                    <button 
-                    onClick={() => dispatch((prev) => ({ ...prev, users: prev.users.map(u => u.id === currentUser.id ? {...u, votoActual: 'YES'} : u) }))} 
+                    onClick={() => dispatch((prev: AppState) => ({ ...prev, users: prev.users.map(u => u.id === currentUser.id ? {...u, votoActual: 'YES'} : u) }))} 
                     className="bg-green-600 text-white p-8 rounded-[2rem] font-black text-2xl uppercase tracking-widest shadow-xl border-b-[10px] border-green-800 flex items-center justify-center gap-6 hover:scale-105 active:translate-y-2 active:border-b-0 transition-all"
                    >
                      <CheckCircle size={32} /> AFIRMATIVO
                    </button>
                    <button 
-                    onClick={() => dispatch((prev) => ({ ...prev, users: prev.users.map(u => u.id === currentUser.id ? {...u, votoActual: 'NO'} : u) }))} 
+                    onClick={() => dispatch((prev: AppState) => ({ ...prev, users: prev.users.map(u => u.id === currentUser.id ? {...u, votoActual: 'NO'} : u) }))} 
                     className="bg-red-600 text-white p-8 rounded-[2rem] font-black text-2xl uppercase tracking-widest shadow-xl border-b-[10px] border-red-800 flex items-center justify-center gap-6 hover:scale-105 active:translate-y-2 active:border-b-0 transition-all"
                    >
                      <XCircle size={32} /> NEGATIVO
                    </button>
                    <button 
-                    onClick={() => dispatch((prev) => ({ ...prev, users: prev.users.map(u => u.id === currentUser.id ? {...u, votoActual: 'ABSTAIN'} : u) }))} 
+                    onClick={() => dispatch((prev: AppState) => ({ ...prev, users: prev.users.map(u => u.id === currentUser.id ? {...u, votoActual: 'ABSTAIN'} : u) }))} 
                     className="bg-slate-500 text-white p-8 rounded-[2rem] font-black text-2xl uppercase tracking-widest shadow-xl border-b-[10px] border-slate-700 flex items-center justify-center gap-6 hover:scale-105 active:translate-y-2 active:border-b-0 transition-all"
                    >
                      <RotateCcw size={32} /> ABSTENCIÓN
@@ -471,7 +489,6 @@ function VotingModule({ appState, currentUser, dispatch, setActiveTab, isPreside
         </div>
       </div>
 
-      {/* Controles del Presidente */}
       {isPresident && (
         <div className="bg-white p-12 rounded-[4rem] shadow-3xl border-t-[15px] border-amber-600 animate-in flex flex-col md:flex-row justify-between items-center gap-8">
            <div className="flex items-center gap-8">
@@ -486,7 +503,7 @@ function VotingModule({ appState, currentUser, dispatch, setActiveTab, isPreside
               <button 
                 onClick={() => {
                   if(confirm("¿Desea borrar todos los votos emitidos? Esta acción es irreversible.")) {
-                    dispatch(prev => ({ ...prev, users: prev.users.map(u => ({...u, votoActual: null})) }));
+                    dispatch((prev: AppState) => ({ ...prev, users: prev.users.map(u => ({...u, votoActual: null})) }));
                   }
                 }} 
                 className="bg-slate-200 text-slate-700 px-10 py-5 rounded-[2rem] font-black uppercase text-xs tracking-widest hover:bg-red-600 hover:text-white transition-all flex items-center gap-3"
@@ -507,7 +524,7 @@ function VotingModule({ appState, currentUser, dispatch, setActiveTab, isPreside
                       votosAbs: stats.ABS,
                       textoLegal: `Sancionado en Puerto Esperanza por el Centro de Estudiantes BOP 20. Con un total de ${stats.TOTAL} votos emitidos.`
                    };
-                   dispatch(prev => ({
+                   dispatch((prev: AppState) => ({
                       ...prev,
                       activeVote: null,
                       users: prev.users.map(u => ({...u, votoActual: null})),
@@ -527,7 +544,6 @@ function VotingModule({ appState, currentUser, dispatch, setActiveTab, isPreside
   );
 }
 
-// Fix: Removed duplicate AttendanceModule implementation.
 function AttendanceModule({ appState, dispatch, hasQuorum, presentCount, total, isPresident }: any) {
   return (
     <div className="space-y-12 animate-in">
@@ -733,7 +749,7 @@ function SpeakerQueueModule({ appState, dispatch, isPresident, currentUser }: an
                           </div>
                        </div>
                        {isPresident && (
-                         <button onClick={() => dispatch(prev => ({ ...prev, speakerId: id, waitingList: prev.waitingList.filter(wid => wid !== id) }))} className="bg-blue-600 text-white px-8 py-3 rounded-2xl font-black text-[10px] uppercase shadow-lg">Ceder</button>
+                         <button onClick={() => dispatch((prev: AppState) => ({ ...prev, speakerId: id, waitingList: prev.waitingList.filter(wid => wid !== id) }))} className="bg-blue-600 text-white px-8 py-3 rounded-2xl font-black text-[10px] uppercase shadow-lg">Ceder</button>
                        )}
                     </div>
                   );
@@ -746,9 +762,9 @@ function SpeakerQueueModule({ appState, dispatch, isPresident, currentUser }: an
              <button 
               onClick={() => {
                   if (isWaiting) {
-                    dispatch(prev => ({ ...prev, waitingList: prev.waitingList.filter(id => id !== currentUser.id) }));
+                    dispatch((prev: AppState) => ({ ...prev, waitingList: prev.waitingList.filter(id => id !== currentUser.id) }));
                   } else {
-                    dispatch(prev => ({ ...prev, waitingList: [...prev.waitingList, currentUser.id] }));
+                    dispatch((prev: AppState) => ({ ...prev, waitingList: [...prev.waitingList, currentUser.id] }));
                   }
                }} 
                className={`w-64 h-64 md:w-80 md:h-80 rounded-[4rem] flex flex-col items-center justify-center transition-all shadow-3xl border-b-[20px] active:translate-y-4 active:border-b-0 ${isWaiting ? 'bg-red-50 text-red-700 border-red-200' : 'bg-slate-900 text-white border-black group-hover:bg-blue-900'}`}
@@ -863,6 +879,14 @@ function SecretaryModule({ id, appState, dispatch, currentUser, isPresident }: a
         alert('PETICIÓN ENVIADA A SECRETARÍA');
     };
 
+    const isAuthorized = useMemo(() => {
+        if (!currentUser) return false;
+        if (isPresident) return true;
+        const cargo = currentUser.cargo || '';
+        const currentSec = secNameMap[id] || '';
+        return cargo.toLowerCase().includes(currentSec.toLowerCase());
+    }, [currentUser, isPresident, id]);
+
     return (
         <div className="space-y-12 animate-in">
             <header className="bg-slate-900 text-white p-20 rounded-[4rem] shadow-2xl relative overflow-hidden flex flex-col md:flex-row items-center justify-between gap-8">
@@ -888,7 +912,7 @@ function SecretaryModule({ id, appState, dispatch, currentUser, isPresident }: a
                     <button onClick={enviarPeticion} className="w-full bg-blue-900 text-white py-6 rounded-3xl font-black uppercase tracking-widest hover:bg-blue-800 transition-all shadow-xl">Enviar Petición Ahora</button>
                 </div>
 
-                {(isPresident || currentUser.cargo.toLowerCase().includes(secNameMap[id].toLowerCase())) && (
+                {isAuthorized && (
                     <div className="bg-white p-12 rounded-[4rem] shadow-xl border space-y-8">
                         <div className="flex items-center gap-4 border-b pb-6">
                             <Inbox className="text-indigo-600" size={32}/>
