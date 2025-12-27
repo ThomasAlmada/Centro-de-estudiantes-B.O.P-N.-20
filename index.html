@@ -12,7 +12,7 @@
     <style>
         body { 
           font-family: 'Inter', sans-serif; 
-          background-color: #F8FAFC;
+          background-color: #020617; /* Fondo oscuro por defecto para cargar */
           overflow: hidden;
         }
         .custom-scrollbar::-webkit-scrollbar {
@@ -36,19 +36,11 @@
           animation: fadeIn 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards;
         }
         button {
-          transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-        }
-        button:hover {
-          transform: translateY(-2px);
-          filter: brightness(1.1);
-        }
-        button:active {
-          transform: translateY(2px);
+          transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
         }
         .bg-quorum-active {
-            background-color: #e0f2fe !important;
+            background-color: #f0f9ff !important;
             border-color: #bae6fd !important;
-            box-shadow: 0 0 30px rgba(186, 230, 253, 0.5);
         }
     </style>
 <script type="importmap">
@@ -61,12 +53,14 @@
     "lucide-react": "https://esm.sh/lucide-react@^0.562.0",
     "react/": "https://esm.sh/react@^19.2.3/",
     "react": "https://esm.sh/react@^19.2.3",
+    "gun/gun": "https://esm.sh/gun@0.2020.1239/gun.js",
+    "gun": "https://esm.sh/gun@0.2020.1239",
     "gun/": "https://esm.sh/gun@^0.2020.1241/"
   }
 }
 </script>
 </head>
-<body class="bg-slate-50 text-slate-900">
+<body class="bg-[#F8FAFC] text-slate-900">
     <div id="root"></div>
     <script type="module" src="/index.tsx"></script>
 </body>
